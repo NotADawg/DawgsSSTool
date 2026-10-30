@@ -16,6 +16,22 @@ $script:Indicators = @(
     'TriggerBot', 'SilentAim', 'PingSpoof', 'FakeLag', 'Velocity',
     'ChestSteal', 'Reach', 'KillAura', 'SelfDestruct'
 )
+$script:FlagGuide = @(
+    [PSCustomObject]@{ Flag = 'AimAssist'; Meaning = 'May relate to automated aiming or target correction.'; FalseFlags = 'Aim-related names in a library, documentation, compatibility code, or an unrelated feature can match.' }
+    [PSCustomObject]@{ Flag = 'AutoClicker'; Meaning = 'May relate to automated attack clicking.'; FalseFlags = 'Click automation utilities, UI tests, accessibility helpers, or references in bundled libraries can match.' }
+    [PSCustomObject]@{ Flag = 'AutoCrystal'; Meaning = 'May relate to automated crystal placement or attacks.'; FalseFlags = 'Crystal item names, guides, or unrelated game logic can match.' }
+    [PSCustomObject]@{ Flag = 'AutoTotem'; Meaning = 'May relate to automatic offhand totem handling.'; FalseFlags = 'Inventory helpers or ordinary totem features can match.' }
+    [PSCustomObject]@{ Flag = 'AutoAnchor'; Meaning = 'May relate to automated respawn-anchor use.'; FalseFlags = 'Anchor item handling or unrelated automation code can match.' }
+    [PSCustomObject]@{ Flag = 'TriggerBot'; Meaning = 'May relate to automatic attacks when a target is under the crosshair.'; FalseFlags = 'The term in docs, examples, libraries, or compatibility code can match.' }
+    [PSCustomObject]@{ Flag = 'SilentAim'; Meaning = 'May relate to aim changes hidden from the player's view.'; FalseFlags = 'Text-only references or unrelated targeting helpers can match.' }
+    [PSCustomObject]@{ Flag = 'PingSpoof'; Meaning = 'May relate to altered network-latency reporting.'; FalseFlags = 'Network diagnostics, test fixtures, or latency utilities can match.' }
+    [PSCustomObject]@{ Flag = 'FakeLag'; Meaning = 'May relate to intentional network delay.'; FalseFlags = 'Networking tests or lag-compensation code can use similar names.' }
+    [PSCustomObject]@{ Flag = 'Velocity'; Meaning = 'May relate to changing knockback or movement response.'; FalseFlags = 'Ordinary movement, physics, or vector code commonly uses this word.' }
+    [PSCustomObject]@{ Flag = 'ChestSteal'; Meaning = 'May relate to automated container looting.'; FalseFlags = 'Inventory utilities, container screens, or unrelated examples can match.' }
+    [PSCustomObject]@{ Flag = 'Reach'; Meaning = 'May relate to changing interaction or attack distance.'; FalseFlags = 'Reachability, UI layout, or other ordinary uses of the word can match.' }
+    [PSCustomObject]@{ Flag = 'KillAura'; Meaning = 'May relate to automated attacks against nearby entities.'; FalseFlags = 'The name in a detector, list, or documentation can match without implementing it.' }
+    [PSCustomObject]@{ Flag = 'SelfDestruct'; Meaning = 'May relate to a feature that attempts to remove or hide itself.'; FalseFlags = 'Installers, cleanup utilities, and unrelated lifecycle code may use this term.' }
+)
 $script:AllResults = @()
 
 function Get-JarReview {
@@ -93,6 +109,113 @@ function Format-Size([long] $Bytes) {
     return "$Bytes bytes"
 }
 
+function Get-OpenGameReview {
+    $gameProcesses = @(Get-Process -Name 'javaw', 'java' -ErrorAction SilentlyContinue |
+        Where-Object { $_.MainWindowTitle -match '(?i)minecraft' })
+    if ($gameProcesses.Count -eq 0) {
+        return [PSCustomObject]@{ Summary = 'No open Minecraft game window was found.'; Details = @('Start the game and keep its window open, then try again.') }
+    }
+
+    $details = [System.Collections.Generic.List[string]]::new()
+    $details.Add('READ-ONLY OPEN-GAME CHECK')
+    $details.Add('This checks visible process command-line agent options and loaded native module paths. It does not read or alter game memory.')
+    $details.Add('')
+    foreach ($game in $gameProcesses) {
+        $game.Refresh()
+        $details.Add("GAME: $($game.MainWindowTitle)")
+        $details.Add("Process ID: $($game.Id)    Process: $($game.ProcessName)")
+
+        $commandLine = $null
+        try {
+            $wmiProcess = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $($game.Id)" -ErrorAction Stop
+            $commandLine = $wmiProcess.CommandLine
+        } catch {
+            $details.Add("Command line: unavailable ($($_.Exception.Message))")
+        }
+
+        if ($commandLine) {
+            $agentOptions = [regex]::Matches($commandLine, '(?i)(?:^|\s)(-javaagent:\S+|-agentlib:\S+|-agentpath:\S+|-Xbootclasspath\S*)') |
+                ForEach-Object { $_.Groups[1].Value }
+            if (@($agentOptions).Count -gt 0) {
+                $details.Add('REVIEW: JVM agent or boot-classpath option is present:')
+                foreach ($option in $agentOptions) { $details.Add("  $option") }
+                $details.Add('Possible false positives: approved profilers, performance tools, monitoring software, or launcher features may use Java agents. Verify the file and its source.')
+            } else {
+                $details.Add('No Java agent or boot-classpath option was visible in the process command line.')
+            }
+        } else {
+            $details.Add('Could not inspect the process command line, so Java agent options could not be checked.')
+        }
+
+        $modulePaths = [System.Collections.Generic.List[string]]::new()
+        $moduleError = $null
+        try {
+            foreach ($module in $game.Modules) {
+                if ($module.FileName) { $modulePaths.Add($module.FileName) }
+            }
+        } catch { $moduleError = $_.Exception.Message }
+
+        if ($moduleError) {
+            $details.Add("Native module list: unavailable ($moduleError)")
+        } else {
+            $windowsRoot = [IO.Path]::GetFullPath($env:WINDIR).TrimEnd('\') + '\'
+            $javaRoot = $null
+            try { $javaRoot = [IO.Path]::GetDirectoryName((Get-CimInstance Win32_Process -Filter "ProcessId = $($game.Id)").ExecutablePath) } catch {}
+            $javaRootPrefix = if ($javaRoot) { [IO.Path]::GetFullPath($javaRoot).TrimEnd('\') + '\' } else { $null }
+            $externalModules = @($modulePaths | Where-Object {
+                $full = $_
+                -not $full.StartsWith($windowsRoot, [StringComparison]::OrdinalIgnoreCase) -and
+                (-not $javaRootPrefix -or -not $full.StartsWith($javaRootPrefix, [StringComparison]::OrdinalIgnoreCase))
+            } | Select-Object -Unique)
+            $details.Add("Loaded native modules: $($modulePaths.Count) total; $($externalModules.Count) outside Windows and the Java runtime folder.")
+            if ($externalModules.Count -gt 0) {
+                $details.Add('REVIEW PATHS (not proof of cheating; overlays, graphics/audio drivers, capture, accessibility, and input tools can load modules):')
+                foreach ($path in ($externalModules | Select-Object -First 40)) { $details.Add("  $path") }
+                if ($externalModules.Count -gt 40) { $details.Add("  ... and $($externalModules.Count - 40) more") }
+            }
+        }
+        $details.Add('')
+    }
+    $details.Add('LIMITS: A clean result does not rule out modified Java classes, runtime injection, or other in-memory changes. A name or path match is only a review lead; validate with trusted tools and context.')
+    [PSCustomObject]@{ Summary = "Checked $($gameProcesses.Count) open Minecraft process(es); results are heuristic."; Details = @($details) }
+}
+
+function Show-FlagGuide {
+    $guideForm = New-Object System.Windows.Forms.Form
+    $guideForm.Text = 'Dawgs SS Tool — Flag and false-positive guide'
+    $guideForm.StartPosition = 'CenterParent'
+    $guideForm.Size = New-Object System.Drawing.Size(1000, 620)
+    $guideForm.MinimumSize = New-Object System.Drawing.Size(760, 440)
+    $guideForm.BackColor = [System.Drawing.Color]::White
+    $guide = New-Object System.Windows.Forms.DataGridView
+    $guide.Dock = 'Fill'
+    $guide.ReadOnly = $true
+    $guide.AllowUserToAddRows = $false
+    $guide.AllowUserToDeleteRows = $false
+    $guide.RowHeadersVisible = $false
+    $guide.AutoSizeColumnsMode = 'Fill'
+    $guide.BackgroundColor = [System.Drawing.Color]::White
+    $guide.EnableHeadersVisualStyles = $false
+    $guide.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(235, 240, 245)
+    [void]$guide.Columns.Add('Flag', 'Flag')
+    [void]$guide.Columns.Add('Meaning', 'What it may indicate')
+    [void]$guide.Columns.Add('FalseFlags', 'Possible false positives')
+    $guide.Columns['Flag'].FillWeight = 27
+    $guide.Columns['Meaning'].FillWeight = 35
+    $guide.Columns['FalseFlags'].FillWeight = 58
+    foreach ($item in $script:FlagGuide) { [void]$guide.Rows.Add($item.Flag, $item.Meaning, $item.FalseFlags) }
+    $note = New-Object System.Windows.Forms.Label
+    $note.Dock = 'Bottom'
+    $note.Height = 48
+    $note.Padding = New-Object System.Windows.Forms.Padding(10)
+    $note.Text = 'These are keyword matches in JAR entries, not proof that a mod performs the behavior. A clean scan cannot prove a mod is safe. Verify the file, source, and context manually.'
+    $note.ForeColor = [System.Drawing.Color]::FromArgb(55, 67, 82)
+    $guideForm.Controls.Add($guide)
+    $guideForm.Controls.Add($note)
+    [void]$guideForm.ShowDialog($form)
+    $guideForm.Dispose()
+}
+
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'Dawgs SS Tool — Minecraft Mod Scanner'
 $form.StartPosition = 'CenterScreen'
@@ -103,7 +226,7 @@ $form.Font = New-Object System.Drawing.Font('Segoe UI', 9)
 
 $header = New-Object System.Windows.Forms.Panel
 $header.Dock = 'Top'
-$header.Height = 104
+$header.Height = 142
 $header.Padding = New-Object System.Windows.Forms.Padding(18, 12, 18, 10)
 $header.BackColor = [System.Drawing.Color]::FromArgb(25, 39, 58)
 $form.Controls.Add($header)
@@ -125,21 +248,21 @@ $header.Controls.Add($subtitle)
 
 $pathBox = New-Object System.Windows.Forms.TextBox
 $pathBox.Location = New-Object System.Drawing.Point(20, 70)
-$pathBox.Size = New-Object System.Drawing.Size(620, 25)
+$pathBox.Size = New-Object System.Drawing.Size(750, 25)
 $pathBox.Anchor = 'Top,Left,Right'
 $pathBox.Text = $Path
 $header.Controls.Add($pathBox)
 
 $browseButton = New-Object System.Windows.Forms.Button
 $browseButton.Text = 'Browse…'
-$browseButton.Location = New-Object System.Drawing.Point(650, 68)
+$browseButton.Location = New-Object System.Drawing.Point(780, 68)
 $browseButton.Size = New-Object System.Drawing.Size(88, 28)
 $browseButton.Anchor = 'Top,Right'
 $header.Controls.Add($browseButton)
 
 $scanButton = New-Object System.Windows.Forms.Button
 $scanButton.Text = 'Scan folder'
-$scanButton.Location = New-Object System.Drawing.Point(746, 68)
+$scanButton.Location = New-Object System.Drawing.Point(20, 105)
 $scanButton.Size = New-Object System.Drawing.Size(108, 28)
 $scanButton.Anchor = 'Top,Right'
 $scanButton.BackColor = [System.Drawing.Color]::FromArgb(76, 175, 128)
@@ -149,18 +272,33 @@ $header.Controls.Add($scanButton)
 
 $exportButton = New-Object System.Windows.Forms.Button
 $exportButton.Text = 'Export CSV…'
-$exportButton.Location = New-Object System.Drawing.Point(862, 68)
+$exportButton.Location = New-Object System.Drawing.Point(136, 105)
 $exportButton.Size = New-Object System.Drawing.Size(108, 28)
 $exportButton.Anchor = 'Top,Right'
 $exportButton.Enabled = $false
 $header.Controls.Add($exportButton)
 
+$gameScanButton = New-Object System.Windows.Forms.Button
+$gameScanButton.Text = 'Scan open game'
+$gameScanButton.Location = New-Object System.Drawing.Point(252, 105)
+$gameScanButton.Size = New-Object System.Drawing.Size(112, 28)
+$gameScanButton.BackColor = [System.Drawing.Color]::FromArgb(71, 126, 181)
+$gameScanButton.ForeColor = [System.Drawing.Color]::White
+$gameScanButton.FlatStyle = 'Flat'
+$header.Controls.Add($gameScanButton)
+
+$guideButton = New-Object System.Windows.Forms.Button
+$guideButton.Text = 'Flags + false positives'
+$guideButton.Location = New-Object System.Drawing.Point(372, 105)
+$guideButton.Size = New-Object System.Drawing.Size(160, 28)
+$header.Controls.Add($guideButton)
+
 $filterBox = New-Object System.Windows.Forms.CheckBox
 $filterBox.Text = 'Show only items needing review'
 $filterBox.AutoSize = $true
-$filterBox.Location = New-Object System.Drawing.Point(18, 115)
+$filterBox.Location = New-Object System.Drawing.Point(550, 111)
 $filterBox.ForeColor = [System.Drawing.Color]::FromArgb(55, 67, 82)
-$form.Controls.Add($filterBox)
+$header.Controls.Add($filterBox)
 
 $split = New-Object System.Windows.Forms.SplitContainer
 $split.Dock = 'Fill'
@@ -218,7 +356,7 @@ $detailText.BorderStyle = 'None'
 $detailText.BackColor = [System.Drawing.Color]::White
 $detailText.ForeColor = [System.Drawing.Color]::FromArgb(50, 62, 76)
 $detailText.Font = New-Object System.Drawing.Font('Consolas', 9)
-$detailText.Text = "Choose a mod in the list to see its scan details.`r`n`r`nThe scan checks a small editable list of strings in JAR class and metadata entries. Matches can be false positives and need human review."
+$detailText.Text = "Choose a mod in the list to see its scan details, or use Scan open game for a read-only process review.`r`n`r`nThe mod scan checks configured strings in JAR class and metadata entries. Matches can be false positives and need human review."
 $detailsPanel.Controls.Add($detailText)
 $detailText.BringToFront()
 
@@ -276,6 +414,7 @@ function Update-Grid {
 function Show-Details {
     param($Item)
     if (-not $Item) { return }
+    $detailHeader.Text = 'MOD DETAILS'
     $lines = [System.Collections.Generic.List[string]]::new()
     $lines.Add("FILE`r`n$($Item.FileName)")
     $lines.Add("`r`nRESULT`r`n$($Item.Result)")
@@ -307,6 +446,26 @@ $browseButton.Add_Click({
 })
 
 $filterBox.Add_CheckedChanged({ Update-Grid })
+$guideButton.Add_Click({ Show-FlagGuide })
+$gameScanButton.Add_Click({
+    try {
+        $gameScanButton.Enabled = $false
+        $statusLabel.Text = 'Checking the open Minecraft process (read-only)…'
+        [System.Windows.Forms.Application]::DoEvents()
+        $review = Get-OpenGameReview
+        $detailHeader.Text = 'OPEN GAME REVIEW'
+        $detailText.Text = @($review.Details) -join "`r`n"
+        $statusLabel.Text = $review.Summary
+    } catch {
+        [void][System.Windows.Forms.MessageBox]::Show(
+            "The open-game review could not finish:`r`n$($_.Exception.Message)",
+            'Game review error', 'OK', 'Warning'
+        )
+        $statusLabel.Text = 'Open-game review could not finish.'
+    } finally {
+        $gameScanButton.Enabled = $true
+    }
+})
 $grid.Add_SelectionChanged({
     if ($grid.SelectedRows.Count -gt 0) { Show-Details $grid.SelectedRows[0].Tag }
 })
