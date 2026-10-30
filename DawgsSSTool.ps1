@@ -23,7 +23,7 @@ $script:FlagGuide = @(
     [PSCustomObject]@{ Flag = 'AutoTotem'; Meaning = 'May relate to automatic offhand totem handling.'; FalseFlags = 'Inventory helpers or ordinary totem features can match.' }
     [PSCustomObject]@{ Flag = 'AutoAnchor'; Meaning = 'May relate to automated respawn-anchor use.'; FalseFlags = 'Anchor item handling or unrelated automation code can match.' }
     [PSCustomObject]@{ Flag = 'TriggerBot'; Meaning = 'May relate to automatic attacks when a target is under the crosshair.'; FalseFlags = 'The term in docs, examples, libraries, or compatibility code can match.' }
-    [PSCustomObject]@{ Flag = 'SilentAim'; Meaning = 'May relate to aim changes hidden from the player's view.'; FalseFlags = 'Text-only references or unrelated targeting helpers can match.' }
+    [PSCustomObject]@{ Flag = 'SilentAim'; Meaning = "May relate to aim changes hidden from the player's view."; FalseFlags = 'Text-only references or unrelated targeting helpers can match.' }
     [PSCustomObject]@{ Flag = 'PingSpoof'; Meaning = 'May relate to altered network-latency reporting.'; FalseFlags = 'Network diagnostics, test fixtures, or latency utilities can match.' }
     [PSCustomObject]@{ Flag = 'FakeLag'; Meaning = 'May relate to intentional network delay.'; FalseFlags = 'Networking tests or lag-compensation code can use similar names.' }
     [PSCustomObject]@{ Flag = 'Velocity'; Meaning = 'May relate to changing knockback or movement response.'; FalseFlags = 'Ordinary movement, physics, or vector code commonly uses this word.' }
