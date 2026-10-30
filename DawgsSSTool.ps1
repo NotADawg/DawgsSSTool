@@ -165,9 +165,6 @@ $form.Controls.Add($filterBox)
 $split = New-Object System.Windows.Forms.SplitContainer
 $split.Dock = 'Fill'
 $split.Orientation = 'Vertical'
-$split.SplitterDistance = 660
-$split.Panel1MinSize = 390
-$split.Panel2MinSize = 300
 $split.BackColor = [System.Drawing.Color]::FromArgb(221, 226, 232)
 $split.Padding = New-Object System.Windows.Forms.Padding(12, 8, 12, 8)
 $form.Controls.Add($split)
@@ -233,6 +230,23 @@ $statusLabel.Spring = $true
 $statusLabel.TextAlign = 'MiddleLeft'
 [void]$footer.Items.Add($statusLabel)
 $form.Controls.Add($footer)
+
+# The Fill-docked split container has its real width only after the form lays
+# out. Set its distance first using that width, then apply panel minimums.
+$form.Add_Shown({
+    $availableWidth = $split.ClientSize.Width
+    $leftMin = 390
+    $rightMin = 300
+    if ($availableWidth -lt ($leftMin + $rightMin)) {
+        $leftMin = [Math]::Max(25, [int][Math]::Floor($availableWidth * 0.55))
+        $rightMin = [Math]::Max(25, $availableWidth - $leftMin)
+    }
+    $maxDistance = $availableWidth - $rightMin
+    $distance = [Math]::Max($leftMin, [Math]::Min(660, $maxDistance))
+    $split.SplitterDistance = $distance
+    $split.Panel1MinSize = $leftMin
+    $split.Panel2MinSize = $rightMin
+})
 
 function Update-Grid {
     $selectedPath = $null
