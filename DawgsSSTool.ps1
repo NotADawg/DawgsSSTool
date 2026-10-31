@@ -32,6 +32,22 @@ $script:FlagGuide = @(
     [PSCustomObject]@{ Flag = 'KillAura'; Meaning = 'May relate to automated attacks against nearby entities.'; FalseFlags = 'The name in a detector, list, or documentation can match without implementing it.' }
     [PSCustomObject]@{ Flag = 'SelfDestruct'; Meaning = 'May relate to a feature that attempts to remove or hide itself.'; FalseFlags = 'Installers, cleanup utilities, and unrelated lifecycle code may use this term.' }
 )
+$script:FlagOrigins = @{
+    'AimAssist'    = 'Common name in cheat clients for aim correction or target tracking.'
+    'AutoClicker'  = 'Generic automation term used for software that generates clicks.'
+    'AutoCrystal'  = 'Minecraft PvP client term for automating End Crystal placement or attacks.'
+    'AutoTotem'    = 'Minecraft client term for automatically equipping a Totem of Undying.'
+    'AutoAnchor'   = 'Minecraft PvP client term for automating Respawn Anchor use.'
+    'TriggerBot'   = 'Shooter-game term for firing automatically when a target is under the crosshair.'
+    'SilentAim'    = 'Cheat-client term for changing aim or target selection without visibly turning the view.'
+    'PingSpoof'    = 'Networking term used for faking or altering reported latency.'
+    'FakeLag'      = 'Cheat-client term for deliberately delaying or withholding network updates.'
+    'Velocity'     = 'Minecraft PvP client category for changing knockback or motion received from the game.'
+    'ChestSteal'   = 'Minecraft client term for automatically moving items from containers.'
+    'Reach'        = 'Minecraft PvP client setting for changing interaction or attack distance.'
+    'KillAura'     = 'Minecraft cheat-client term for automatically attacking nearby entities.'
+    'SelfDestruct' = 'Cheat-client term for attempting to remove or hide client components.'
+}
 $script:AllResults = @()
 
 function Get-JarReview {
@@ -198,12 +214,14 @@ function Show-FlagGuide {
     $guide.EnableHeadersVisualStyles = $false
     $guide.ColumnHeadersDefaultCellStyle.BackColor = [System.Drawing.Color]::FromArgb(235, 240, 245)
     [void]$guide.Columns.Add('Flag', 'Flag')
+    [void]$guide.Columns.Add('Origin', 'Common term origin')
     [void]$guide.Columns.Add('Meaning', 'What it may indicate')
     [void]$guide.Columns.Add('FalseFlags', 'Possible false positives')
-    $guide.Columns['Flag'].FillWeight = 27
+    $guide.Columns['Flag'].FillWeight = 22
+    $guide.Columns['Origin'].FillWeight = 42
     $guide.Columns['Meaning'].FillWeight = 35
     $guide.Columns['FalseFlags'].FillWeight = 58
-    foreach ($item in $script:FlagGuide) { [void]$guide.Rows.Add($item.Flag, $item.Meaning, $item.FalseFlags) }
+    foreach ($item in $script:FlagGuide) { [void]$guide.Rows.Add($item.Flag, $script:FlagOrigins[$item.Flag], $item.Meaning, $item.FalseFlags) }
     $note = New-Object System.Windows.Forms.Label
     $note.Dock = 'Bottom'
     $note.Height = 48
